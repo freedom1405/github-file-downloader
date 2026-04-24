@@ -1,4 +1,4 @@
-name: دانلود فایل و ساخت ZIP رمزدار
+name: دانلود فایل و ساخت آرشیو چندتکه رمزدار
 
 on:
   workflow_dispatch:
@@ -13,10 +13,10 @@ on:
         type: string
 
 permissions:
-  contents: write   # اجازه Push به مخزن
+  contents: write
 
 jobs:
-  download-and-zip:
+  download-and-split:
     runs-on: ubuntu-latest
 
     steps:
@@ -25,29 +25,34 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: نصب 7z
+        run: sudo apt-get update && sudo apt-get install -y p7zip-full
+
       - name: دانلود فایل از لینک
         run: |
-          curl -L -o downloaded_file "${{ github.event.inputs.file_url }}"
-          echo "FILE_NAME=downloaded_file" >> $GITHUB_ENV
+          curl -L --fail --retry 3 -o downloaded_file "${{ github.event.inputs.file_url }}"
+          ls -lh downloaded_file
 
-      - name: استخراج نام اصلی فایل (اختیاری)
+      - name: استخراج نام اصلی فایل
         run: |
           ORIGINAL_NAME=$(basename "${{ github.event.inputs.file_url }}" | cut -d '?' -f1)
-          if [ -z "$ORIGINAL_NAME" ]; then
-            ORIGINAL_NAME="downloaded_file"
-          fi
+          [ -z "$ORIGINAL_NAME" ] && ORIGINAL_NAME="downloaded_file"
           echo "ORIGINAL_NAME=$ORIGINAL_NAME" >> $GITHUB_ENV
 
-      - name: ساخت ZIP رمزدار
+      - name: ساخت آرشیو رمزدار چندتکه (هر تکه ۹۵ مگابایت)
         run: |
-          ZIP_NAME="protected_${ORIGINAL_NAME}.zip"
-          zip -P "${{ github.event.inputs.zip_password }}" "$ZIP_NAME" downloaded_file
-          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+          # -v95m : هر جلد ۹۵ مگابایت (ایمن برای گیت)
+          # -mhe=on : رمزگذاری اسم فایل‌های داخل
+          # -mx=3 : فشرده‌سازی متوسط و سریع
+          7z a -p"${{ github.event.inputs.zip_password }}" -mhe=on -mx=3 -v95m "archive.7z" downloaded_file
 
-      - name: Commit و Push فایل ZIP به مخزن
+      - name: حذف فایل دانلود شده (برای اینکه داخل ریپازیتوری نره)
+        run: rm -f downloaded_file
+
+      - name: Commit و Push فایل‌های چندتکه
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "${{ env.ZIP_NAME }}"
-          git commit -m "Add encrypted zip file from workflow"
+          git add archive.7z.*
+          git commit -m "Add password-protected multi-volume archive (each volume <100MB)"
           git push
